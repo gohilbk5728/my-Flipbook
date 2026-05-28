@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="gu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ગૂગલ સાઇટ ફ્લિપબુક</title>
+    <!-- Tailwind CSS (ડિઝાઇન માટે) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome (આઇકોન માટે) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- PDF.js (PDF વાંચવા માટે) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <!-- PageFlip.js (3D ફ્લિપ ઇફેક્ટ માટે) -->
+    <script src="https://cdn.jsdelivr.net/npm/page-flip/dist/js/page-flip.browser.js"></script>
+
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: transparent; /* ગૂગલ સાઇટના બેકગ્રાઉન્ડ સાથે મેચ થવા */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+        }
+
+        #app-container {
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.05);
+        }
+
+        .flipbook-viewport {
+            flex-grow: 1;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .flipbook-container {
+            display: none;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .page {
+            background-color: white;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .page img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            pointer-events: none; /* ડ્રેગ થતું અટકાવવા */
+        }
+
+        /* લોડિંગ એનિમેશન */
+        .loader {
+            border: 4px solid #e2e8f0;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div id="app-container">
+        <!-- હેડર અને કંટ્રોલ્સ -->
+        <header class="bg-white shadow-sm p-3 flex justify-between items-center z-10 rounded-t-lg">
+            <div class="text-gray-700 font-bold flex items-center gap-2">
+                <i class="fa-solid fa-book-open text-blue-500"></i> ફ્લિપબુક
+            </div>
+            
+            <div id="controls" class="hidden flex items-center gap-3">
+                <button onclick="prevPage()" class="w-8 h-8 flex items-center justify-center bg-gray-200 hover:bg-gray-300 rounded-full transition" title="પાછળ">
+                    <i class="fa-solid fa-angle-left"></i>
+                </button>
+                <span id="pageInfo" class="text-sm font-semibold text-gray-600">0 / 0</span>
+                <button onclick="nextPage()" class="w-8 h-8 flex items-center justify-center bg-gray-200 hover:bg-gray-300 rounded-full transition" title="આગળ">
+                    <i class="fa-solid fa-angle-right"></i>
+                </button>
+            </div>
+
+            <label class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded shadow cursor-pointer transition text-sm flex items-center gap-2">
+                <i class="fa-solid fa-upload"></i> <span class="hidden sm:inline">PDF પસંદ કરો</span>
+                <input type="file" id="pdfInput" accept="application/pdf" class="hidden">
+            </label>
+        </header>
+
+        <!-- ફ્લિપબુક એરિયા -->
+        <div class="flipbook-viewport" id="viewport">
+            
+            <!-- શરૂઆતનો મેસેજ -->
+            <div id="startScreen" class="text-center p-6">
+                <i class="fa-regular fa-file-pdf text-5xl text-gray-400 mb-3"></i>
+                <h2 class="text-xl font-bold text-gray-700 mb-2">ફ્લિપબુક જોવા માટે તૈયાર છે</h2>
+                <p class="text-gray-500 text-sm">ઉપરના બટન પર ક્લિક કરી તમારી PDF અપલોડ કરો.</p>
+            </div>
+
+            <!-- લોડિંગ -->
+            <div id="loadingScreen" class="hidden flex-col items-center justify-center absolute inset-0 bg-white bg-opacity-90 z-20">
+                <div class="loader mb-3"></div>
+                <p class="text-gray-600 font-medium" id="loadingText">તૈયાર થઈ રહ્યું છે...</p>
+            </div>
+
+            <!-- બુક કન્ટેનર -->
+            <div class="flipbook-container" id="book"></div>
+        </div>
+    </div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+        let pageFlip = null;
+        let totalPages = 0;
+
+        const pdfInput = document.getElementById('pdfInput');
+        const startScreen = document.getElementById('startScreen');
+        const loadingScreen = document.getElementById('loadingScreen');
+        const bookContainer = document.getElementById('book');
+        const controls = document.getElementById('controls');
+        const pageInfo = document.getElementById('pageInfo');
+        const loadingText = document.getElementById('loadingText');
+
+        pdfInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            if (file.type !== "application/pdf") {
+                alert("માત્ર PDF ફાઇલ માન્ય છે.");
+                return;
+            }
+
+            startScreen.classList.add('hidden');
+            loadingScreen.classList.remove('hidden');
+            loadingScreen.classList.add('flex');
+            
+            const arrayBuffer = await file.arrayBuffer();
+            await processPDF(arrayBuffer);
+        });
+
+        async function processPDF(data) {
+            try {
+                const loadingTask = pdfjsLib.getDocument({data: data});
+                const pdfDocument = await loadingTask.promise;
+                totalPages = pdfDocument.numPages;
+                
+                bookContainer.innerHTML = ''; // જૂનો ડેટા સાફ કરો
+
+                // Google Site ના Iframe માં બહુ મોટી સાઇઝ ક્રેશ કરી શકે, તેથી scale 1.2 રાખ્યું છે
+                for (let i = 1; i <= totalPages; i++) {
+                    loadingText.innerText = `પેજ ${i} / ${totalPages} બની રહ્યું છે...`;
+                    const page = await pdfDocument.getPage(i);
+                    const viewport = page.getViewport({ scale: 1.2 });
+                    
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    
+                    await page.render({ canvasContext: context, viewport: viewport }).promise;
+                    
+                    const imgUrl = canvas.toDataURL('image/jpeg', 0.8);
+                    const div = document.createElement('div');
+                    div.className = 'page';
+                    div.innerHTML = `<img src="${imgUrl}" alt="Page ${i}">`;
+                    bookContainer.appendChild(div);
+                }
+
+                initFlipbook();
+            } catch (error) {
+                console.error(error);
+                alert("PDF પ્રોસેસ કરવામાં ભૂલ. ફાઇલ કદાચ મોટી અથવા ખરાબ છે.");
+                loadingScreen.classList.add('hidden');
+                loadingScreen.classList.remove('flex');
+                startScreen.classList.remove('hidden');
+            }
+        }
+
+        function initFlipbook() {
+            if (pageFlip) pageFlip.destroy();
+
+            bookContainer.style.display = 'block';
+            controls.classList.remove('hidden');
+            loadingScreen.classList.add('hidden');
+            loadingScreen.classList.remove('flex');
+
+            // Google સાઇટના વિજેટ મુજબ સાઈઝ એડજસ્ટમેન્ટ
+            const containerWidth = document.getElementById('viewport').clientWidth;
+            const containerHeight = document.getElementById('viewport').clientHeight;
+            
+            // સાઇઝની ગણતરી (મોબાઈલ અને ડેસ્કટોપ માટે)
+            let bWidth = 350;
+            let bHeight = 500;
+            let displayState = "stretch"; // મોબાઈલમાં એક પેજ, ડેસ્કટોપમાં બે પેજ
+
+            if(containerWidth < 600) {
+                bWidth = containerWidth - 20;
+                bHeight = (bWidth * 1.4); 
+            }
+
+            pageFlip = new St.PageFlip(bookContainer, {
+                width: bWidth,
+                height: bHeight,
+                size: "stretch",
+                minWidth: 250,
+                maxWidth: 800,
+                minHeight: 350,
+                maxHeight: 1000,
+                showCover: true,
+                maxShadowOpacity: 0.3,
+                usePortrait: true // મોબાઇલમાં એક પેજ દેખાશે
+            });
+
+            pageFlip.loadFromHTML(document.querySelectorAll('.page'));
+
+            pageFlip.on('flip', () => updatePageInfo());
+            updatePageInfo();
+        }
+
+        function prevPage() { if(pageFlip) pageFlip.flipPrev(); }
+        function nextPage() { if(pageFlip) pageFlip.flipNext(); }
+
+        function updatePageInfo() {
+            if(!pageFlip) return;
+            const current = pageFlip.getCurrentPageIndex() + 1;
+            pageInfo.innerText = `${current} / ${totalPages}`;
+        }
+    </script>
+</body>
+</html>
